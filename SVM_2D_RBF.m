@@ -1,5 +1,3 @@
-%error vs. tree level
-%plug training data into SVM to find the position of each leaf
 %% 
 close all
 N0 = -100;  %-100dBm
@@ -14,7 +12,7 @@ dim1 = 20;
 dim2 = 20;  %dimensions of the grid
 tx = [1,1;dim1,1;1,dim2;dim1,dim2]; %tx position
 ntx = length(tx(:,1));
-nodes = 63;
+nodes = 3;
 c = [1+1j;1-1j;-1+1j;-1-1j];
 %% 
 
@@ -59,15 +57,21 @@ legend('receivers','transmitters');
 node_list = [15 31 63 127];
 rhat_list = [2.3 2.8 3.3 3.8 4.3 4.8];
 error_list = [];
+
+figure()
+xlim([0 dim1]);
+ylim([0 dim2]);
+hold on
+
 for n = 1%:length(rhat_list)
     %rhat = rhat_list(n)
-    SVM1 = SVM_rec_1D_fix(pr_est(1:train_count,:),position(1:train_count,:),dim1,dim2,rhat,pt_lin,1,nodes); %leaf = 2^level-1
+    SVM1 = SVM_rec_1D_RBF(pr_est(1:train_count,:),position(1:train_count,:),dim1,dim2,1,nodes); %leaf = 2^level-1
     Sfield = fieldnames(SVM1);
     Scell = struct2cell(SVM1);
     sz = size(Scell);
     Scell = reshape(Scell,sz(1),[]);
     Scell = Scell';
-    Scell = sortrows(Scell,3);
+    Scell = sortrows(Scell,2);
     Scell = reshape(Scell',sz);
     SVM1 = cell2struct(Scell,Sfield,1);  %sort SVM based on idx
 
@@ -86,13 +90,13 @@ for n = 1%:length(rhat_list)
             posk = position(1:train_count,k);
             pos(:,k) = posk(class);
         end
-        temp = SVM_rec_2D_fix(pr,pos,dim1,dim2,rhat,pt_lin,1,nodes);
+        temp = SVM_rec_2D_RBF(pr,pos,dim1,dim2,1,nodes);
         Sfield = fieldnames(temp);
         Scell = struct2cell(temp);
         sz = size(Scell);
         Scell = reshape(Scell,sz(1),[]);
         Scell = Scell';
-        Scell = sortrows(Scell,3);
+        Scell = sortrows(Scell,2);
         Scell = reshape(Scell',sz);
         temp = cell2struct(Scell,Sfield,1);  %sort temp based on idx
 
@@ -112,17 +116,14 @@ for n = 1%:length(rhat_list)
     %% find the location of training data
     loc_test = zeros(test_count,2);
     error = 0;
+    
     for i = train_count+1:data_count
         idx1 = 1;
         while (idx1 <= nodes)
-            if (length(SVM1(idx1).w) < ntx)
-                if(SVM1(idx1).b < 0)
-                    idx1 = idx1 * 2;
-                else
+            if (isempty(SVM1(idx1).clf))
                     idx1 = idx1 * 2 + 1;
-                end
             else
-                if((pr_est(i,:)/pt_lin).^(-1/rhat)*SVM1(idx1).w+SVM1(idx1).b < 0)
+                if(SVM1(idx1).clf.predict(pr_est(i,:)) < 0)
                     idx1 = idx1 * 2;
                 else
                     idx1 = idx1 * 2 + 1;
@@ -132,16 +133,10 @@ for n = 1%:length(rhat_list)
         idx1 = idx1 - length(SVM1);
         idx2 = 1;
         while (idx2 <= nodes)    %leaves of SVM1
-            if (length(SVM2(idx2,idx1).w) < ntx)
-                if(SVM2(idx2,idx1).b < 0)
-                %if(SVM2(idx2,idx1).b < 0)
+            if (isempty(SVM2(idx2,idx1).clf))
                     idx2 = idx2 * 2;
-                else
-                    idx2 = idx2 * 2 + 1;
-                end
             else
-                if((pr_est(i,:)/pt_lin).^(-1/rhat)*SVM2(idx2,idx1).w+SVM2(idx2,idx1).b < 0)
-                %if((test_pr_est(k,:))*SVM2(idx2,idx1).w+SVM2(idx2,idx1).b < 0)
+                if(SVM2(idx2,idx1).clf.predict(pr_est(i,:)) < 0)
                     idx2 = idx2 * 2;
                 else
                     idx2 = idx2 * 2 + 1;
@@ -149,9 +144,13 @@ for n = 1%:length(rhat_list)
             end
         end
         idx2 = idx2 - length(SVM2(:,1));
+        
         loc_test(i,:) = mapping(idx1,idx2,:);
+        if(i <= train_count+35)
+           text(position(i,1),position(i,2),['(' num2str(loc_test(i,:)) ')']); 
+        end
         if(isnan(int16(mapping(idx1,idx2,:))))
-            loc_test(i,:) = [dim1/2,dim2/2];
+           loc_test(i,:) = [dim1/2,dim2/2];
         end
         error = error + norm(loc_test(i,:)-position(i,:))^2;
     end
@@ -159,102 +158,3 @@ for n = 1%:length(rhat_list)
     error_list = [error_list error_ms];
     display(error_ms)
 end
-
-%% plot the grouping
-% group = zeros(test_count,1);
-% 
-% for i = 1:train_count
-%     idx = 1;
-%     while (idx <= 2^(floor(log2(length(SVM1)+1)))-1)
-%         if(pr_est(i,:)*SVM1(idx).w+SVM1(idx).b < 0)
-%             idx = idx * 2;
-%         else
-%             idx = idx * 2 + 1;
-%         end
-%     end
-%     group(i) = (idx);
-% end
-% 
-% group = group - min(group) + 1;
-% figure(3);
-% xlim([0 dim1]);
-% ylim([0 dim2]);
-% hold on
-% for i = 1:test_count
-%     text(position(i,1),position(i,2),num2str(group(i)));
-% end
-
-%%
-% class = position(:,1) > dim1/2;
-% class = class*2 - 1;    %in class 1 if on the left half, in class 2 if on the right half
-% SVMModel = fitcsvm(pr_est(1:train_count,:),class(1:train_count));
-% 
-% class = position(:,1) > dim1/2;
-% prpos = [];
-% prneg = [];
-% pospos = [];
-% posneg = [];
-% for i = 1:length(pr_est(1,:))
-%     pr = pr_est(1:train_count,i);
-%     prpos(:,i) = pr(class(1:train_count));
-%     prneg(:,i) = pr(~class(1:train_count));
-% end
-% 
-% for i = 1:length(position(1,:))
-%     pos = position(1:train_count,i);
-%     pospos(:,i) = pos(class(1:train_count));
-%     posneg(:,i) = pos(~class(1:train_count));
-% end
-% 
-% class1 = posneg(:,1) > dim1/4;
-% class2 = pospos(:,1) > dim1*3/4;
-% class1 = class1*2-1;
-% class2 = class2*2-1;
-% SVMModel1 = fitcsvm(prneg,class1);
-% SVMModel2 = fitcsvm(prpos,class2);
-% 
-% error_count = 0;
-% for i = 1:train_count
-%     if((pr_est(i,:)*SVMModel.Beta + SVMModel.Bias) < 0)
-%         if((pr_est(i,:)*SVMModel1.Beta + SVMModel1.Bias) < 0 && position(i,1) > dim1/4)
-%             error_count = error_count + 1;
-%         elseif((pr_est(i,:)*SVMModel1.Beta + SVMModel1.Bias) > 0 && position(i,1) < dim1/4)
-%             error_count = error_count + 1;
-%         end
-%     else
-%         if((pr_est(i,:)*SVMModel2.Beta + SVMModel2.Bias) < 0 && position(i,1) > dim1*3/4)
-%             error_count = error_count + 1; 
-%         elseif((pr_est(i,:)*SVMModel2.Beta + SVMModel2.Bias) > 0 && position(i,1) < dim1*3/4)
-%             error_count = error_count + 1;
-%         end
-%     end
-% end
-% train_error_rate = error_count/train_count;
-% 
-% error_count = 0;
-% for i = train_count+1 : data_count
-%     if((pr_est(i,:)*SVMModel.Beta + SVMModel.Bias)*class(i) < 0)
-%        error_count = error_count + 1; 
-%     end
-% end
-% test_error_rate = error_count/test_count;
-% display(train_error_rate);
-% display(test_error_rate);
-% 
-% class1 = [];
-% class2 = [];
-% w = SVMModel1.Beta;
-% b = SVMModel1.Bias;
-% for i = 1:length(prneg)
-%     if(prneg(i,:)*w+b < 0)
-%         class1 = [class1; posneg(i,:)];
-%     else
-%         class2 = [class2; posneg(i,:)];
-%     end
-% end
-% 
-% figure(2)
-% plot(class1(:,1),class1(:,2),'o')
-% hold on
-% plot(class2(:,1),class2(:,2),'o')
-% hold off
